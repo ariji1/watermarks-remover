@@ -246,6 +246,180 @@ make serve                 # http://127.0.0.1:8765
 python3 service/scripts/server.py --host 127.0.0.1 --port 8765
 ```
 
+## MCP Server Implementation (without Docker)
+
+This project includes a **Model Context Protocol (MCP) server** implementation that exposes watermark removal capabilities as MCP tools, requiring no Docker or external service deployment. Use this when integrating with any MCP-compatible client (Claude, Cursor, or custom agents).
+
+### Quick Start
+
+1. **Start the service** (if not already running):
+   ```bash
+   make serve  # or: python3 service/scripts/server.py
+   ```
+
+2. **Configure your MCP client** to connect to the watermarks-remover server:
+   ```json
+   {
+     "mcpServers": {
+       "watermarks-remover": {
+         "command": "python3",
+         "args": ["/path/to/watermarks-remover/service/scripts/server.py"]
+       }
+     }
+   }
+   ```
+
+3. **Use the tools** in your MCP-compatible client
+
+### Available MCP Tools
+
+The MCP server exposes the following tools:
+
+#### 1. **inspect_file**
+Analyze a file or text for AI provenance marks without modifying it.
+
+**Parameters:**
+- `file_path` (string, required): Path to the file to inspect
+- `content` (string, optional): Raw text content (when file_path is unavailable)
+
+**Returns:**
+- `ok` (boolean): Whether inspection succeeded
+- `kind` (string): File type detected (text, image, document, unknown)
+- `suspicious` (boolean): Whether AI marks were detected
+- `report` (object): Detailed findings including:
+  - Layer A detections (invisible Unicode, exotic spaces)
+  - Layer B detections (statistical text watermarks)
+  - File metadata marks (C2PA, EXIF, XMP, document properties)
+  - Vendor identification (Claude, Gemini, OpenAI, open-LLM)
+
+**Example Usage:**
+```
+Inspect this file for AI watermarks: notes.md
+```
+
+#### 2. **clean_file**
+Remove detected AI provenance marks from files or text.
+
+**Parameters:**
+- `file_path` (string, required): Path to the file to clean
+- `output_path` (string, optional): Where to save the cleaned file (defaults to `.cleaned` suffix)
+- `content` (string, optional): Raw text content to clean
+- `strategy` (string, optional): Cleaning strategy (default: config/clean_strategy.json)
+- `options` (object, optional): Advanced cleaning options:
+  - `nfkc` (boolean): Apply Unicode normalization
+  - `aggressive_homoglyphs` (boolean): Remove lookalike characters
+  - `keep_non_ai_metadata` (boolean): Preserve non-AI metadata
+  - `strip_all_metadata` (boolean): Remove all metadata
+  - `remove_pixel` (string): Remove pixel-level marks ('ctrlregen' or 'diffusion')
+  - `deep_images` (string): PDF embedded image strategy ('auto', 'always', 'lossless', 'never')
+  - `clean_attachments` (string): PDF attachment strategy ('auto', 'always', 'never')
+
+**Returns:**
+- `ok` (boolean): Whether cleaning succeeded
+- `kind` (string): File type processed
+- `cleaned` (string or base64): Cleaned content
+- `report` (object): Summary of removed marks and strategies applied
+
+**Supported Formats:**
+- **Text:** `.txt`, `.md`, `.html`, `.tex`, `.csv`, `.json`, `.xml`
+- **Images:** `.png`, `.jpg`, `.jpeg`, `.webp`, `.avif`, `.heic`, `.bmp`, `.gif`, `.tiff`
+- **Documents:** `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.epub`, `.odt`, `.doc`
+- **Containers:** `.svg`, `.mp4`, `.mov`, `.m4a`, `.m4v`, `.wav`, `.mp3`, `.flac`
+
+**Example Usage:**
+```
+Clean the AI watermarks from my document and save as report.cleaned.pdf
+```
+
+#### 3. **detect_watermarks**
+Detect specific watermark types (for advanced use).
+
+**Parameters:**
+- `file_path` (string): Path to file containing text
+- `detection_type` (string, optional): Specific detector ('claude-text', 'markllm', 'synthid')
+
+**Returns:**
+- `ok` (boolean): Whether detection succeeded
+- `detections` (array): List of detected watermarks with type and confidence
+- `vendor` (string): Detected vendor/ecosystem
+
+**Example Usage:**
+```
+Detect what type of AI watermark is in this text
+```
+
+#### 4. **get_capabilities**
+Check what optional tools and backends are available on the service.
+
+**Returns:**
+- `tools_available` (object): Installed external tools (c2patool, exiftool, qpdf, ghostscript)
+- `scorers_available` (array): Available scoring backends (stylometry, SynthID)
+- `text_detectors` (array): Available text watermark detectors
+- `pixel_backends` (array): Available image watermark removal backends
+- `service_version` (string): Service version
+
+**Example Usage:**
+```
+What capabilities does the watermarks service have?
+```
+
+### Configuration
+
+Set environment variables to customize the MCP server behavior:
+
+```bash
+# Service URL (if running separately)
+export WATERMARKS_SERVICE_URL=http://127.0.0.1:8765
+
+# API Key (if service requires authentication)
+export WATERMARKS_SERVER_API_KEY=your-api-key-here
+
+# Hook mode for automatic cleaning
+export WATERMARKS_HOOK_MODE=check    # or: clean
+
+# Logging level
+export DEBUG=1  # Verbose output
+```
+
+### Service Health Check
+
+The MCP server automatically health-checks the underlying HTTP service on startup. If the service is unavailable:
+
+```bash
+# Verify the service is running
+curl http://127.0.0.1:8765/health
+
+# Expected response:
+# {"ok": true, "version": "0.7.0"}
+```
+
+### Supported Vendors & Mark Types
+
+The MCP implementation detects and removes marks from:
+
+| Vendor | Mark Type | Layer |
+| --- | --- | --- |
+| **Claude** | Invisible Unicode markers | A |
+| **Claude** | Token sampling watermark | B |
+| **Gemini/SynthID** | Statistical text marks | B |
+| **OpenAI** | Provenance metadata | File |
+| **Open-LLM** | Kirchenbauer-style (green-list) marks | B |
+| **Open-LLM** | Keyed-Gumbel / EXP marks | B |
+| **Any** | C2PA / Content Credentials | File |
+| **Any** | EXIF / XMP metadata | File |
+| **Any** | Document properties (PDF, DOCX, etc) | File |
+
+### Ethics & Responsible Use
+
+This MCP tool is intended for **your own content only** — use it for:
+- ✅ Privacy and hygiene on content you own
+- ✅ Research and testing
+- ✅ Removing watermarks from your own AI-generated work
+- ❌ Do not use to fraudulently claim human authorship
+- ❌ Do not use for academic dishonesty or illegal non-disclosure
+
+Always disclose when content has been processed, and use responsibly.
+
 ### Windows (no Docker)
 
 See [docs/windows-autostart.md](docs/windows-autostart.md) for auto-starting the service at Windows login without Docker.
